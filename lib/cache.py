@@ -121,7 +121,6 @@ class LocalCache(BaseCache):
         if ttl != 0:
             ttl = time.time() + ttl
         self._cache[key] = (data, ttl)
-        print key, len(str(data))
         #res = self._lru.set(key)
         #if res:
         #    self.delete(res)

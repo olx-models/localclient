@@ -9,12 +9,12 @@ from lib.http import urlopen
 from lib.cache import LocalCache
 
 URLS = 'urls3.txt'
-REQS = 10
+REQS = 100000
 VERBOSE = False
 
 
 class BaseLocalClient(object):
-    def __init__(self, cache_max_items=1000, ttl=900):
+    def __init__(self, cache_max_items=1000, ttl=60):
         self._cache = LocalCache(cache_max_items)
         self.ttl = ttl
         self.verbose = False
@@ -53,22 +53,41 @@ class KeepAliveClient(BaseLocalClient):
     def urlget(self, url):
         url = urlparse(url)
 
-        key = url.hostname + ':' + str(url.port)
-        conn = self._connections.get(key, None)
-        if conn is None:
-            conn = httplib.HTTPConnection(url.hostname, url.port)
-            self._connections[key] = conn
-
         q = url.path
         if url.query:
             q += '?' + url.query
+
+        conn = self.get_connection(url.hostname, url.port)
         conn.request('GET', q)
-        res = conn.getresponse()
+
+        try:
+            res = conn.getresponse()
+        except httplib.BadStatusLine:
+            self.close_connection(url.hostname, url.port)
+            conn = self.get_connection(url.hostname, url.port)
+            conn.request('GET', q)
+            res = conn.getresponse()
+
+
         if res.status == 200:
             doc = res.read()
             doc = json.loads(doc)
             return doc['response']
         return ''
+
+    def get_connection(self, host, port):
+        key = host + ':' + str(port)
+        conn = self._connections.get(key, None)
+        if conn is None:
+            conn = httplib.HTTPConnection(host, port)
+            self._connections[key] = conn
+        return conn
+
+    def close_connection(self, host, port):
+        key = host + ':' + str(port)
+        if key in self._connections:
+            self._connections[key].close()
+            del(self._connections[key])
 
 
 class SimpleLocalClient(KeepAliveClient):
@@ -84,16 +103,19 @@ class MultiRequestClient(KeepAliveClient):
         self.subresources = ['country', 'state', 'city', 'image']
 
     def fetch_listing(self, url):
-        doc = self.fetch(url)
-        new_data = []
-        for item_url in doc['data']:
-            item_doc = self.fetch(item_url)
-            for subres in self.subresources:
-                if subres in item_doc['resources']:
-                    subres_doc = self.fetch(item_doc['resources'][subres])
-                    item_doc['data'][subres] = subres_doc['data']
-            new_data.append(item_doc['data'])
-        doc['data'] = new_data
+        doc = self._cache.get(url, None)
+        if doc is None:
+            doc = self.fetch(url)
+            new_data = []
+            for item_url in doc['data']:
+                item_doc = self.fetch(item_url)
+                for subres in self.subresources:
+                    if subres in item_doc['resources']:
+                        subres_doc = self.fetch(item_doc['resources'][subres])
+                        item_doc['data'][subres] = subres_doc['data']
+                new_data.append(item_doc['data'])
+            doc['data'] = new_data
+            self._cache.set(url, doc, self.ttl)
         return doc
 
 
