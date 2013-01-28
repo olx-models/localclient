@@ -16,8 +16,6 @@ import sys
 import json
 import hashlib
 
-from lib import lru
-
 
 def hashed_key(fn):
     def inner(*args, **kwargs):
@@ -94,7 +92,6 @@ class LocalCache(BaseCache):
 
     def __init__(self, max_items=1000):
         self._cache = {}
-        self._lru = lru.LRU(max_items=max_items)
         self._lock = threading.RLock()
         super(LocalCache, self).__init__()
 
@@ -107,9 +104,6 @@ class LocalCache(BaseCache):
 
         if ttl is not None:
             if ttl == 0 or ttl >= time.time():
-                #res = self._lru.set(key)
-                #if res:
-                #    self.delete(res)
                 return copy.deepcopy(value)
             else:
                 self.delete(key)
@@ -121,22 +115,17 @@ class LocalCache(BaseCache):
         if ttl != 0:
             ttl = time.time() + ttl
         self._cache[key] = (data, ttl)
-        #res = self._lru.set(key)
-        #if res:
-        #    self.delete(res)
 
     @hashed_key
     def delete(self, key):
         with self._lock:
             if key in self._cache:
                 del self._cache[key]
-                #self._lru.delete(key)
 
     def clear(self):
         """ Deletes all cache keys. """
         with self._lock:
             self._cache = {}
-            #self._lru.flush()
 
     def __len__(self):
         return len(self._cache)
